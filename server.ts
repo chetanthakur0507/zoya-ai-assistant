@@ -320,9 +320,22 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const distPath = path.resolve(__dirname, 'dist');
+    const indexPath = path.resolve(distPath, 'index.html');
+
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
+
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist/index.html'));
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(500).send(`
+          <h2>Frontend build not found</h2>
+          <p>Please make sure Render's <b>Build Command</b> includes <code>bun run build</code> or <code>npm run build</code>.</p>
+        `);
+      }
     });
   }
 
