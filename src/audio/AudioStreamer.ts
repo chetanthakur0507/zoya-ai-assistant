@@ -34,7 +34,11 @@ export class AudioStreamer {
     // 1. Prepare Output AudioContext (24kHz for Gemini Live)
     if (!this.outputAudioCtx || this.outputAudioCtx.state === 'closed') {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.outputAudioCtx = new AudioCtxClass({ sampleRate: 24000 });
+      try {
+        this.outputAudioCtx = new AudioCtxClass({ sampleRate: 24000 });
+      } catch {
+        this.outputAudioCtx = new AudioCtxClass();
+      }
       this.outputAnalyser = this.outputAudioCtx.createAnalyser();
       this.outputAnalyser.fftSize = 128;
       this.outputAnalyser.smoothingTimeConstant = 0.8;
@@ -49,7 +53,11 @@ export class AudioStreamer {
     // 2. Prepare Input AudioContext (16kHz for Gemini mic input)
     if (!this.inputAudioCtx || this.inputAudioCtx.state === 'closed') {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.inputAudioCtx = new AudioCtxClass({ sampleRate: 16000 });
+      try {
+        this.inputAudioCtx = new AudioCtxClass({ sampleRate: 16000 });
+      } catch {
+        this.inputAudioCtx = new AudioCtxClass();
+      }
       this.inputAnalyser = this.inputAudioCtx.createAnalyser();
       this.inputAnalyser.fftSize = 128;
       this.inputAnalyser.smoothingTimeConstant = 0.8;
@@ -87,7 +95,9 @@ export class AudioStreamer {
       if (this.isMuted) return;
 
       const inputBuffer = e.inputBuffer.getChannelData(0);
-      const pcm16Buffer = this.floatTo16BitPCM(inputBuffer);
+      const actualSampleRate = this.inputAudioCtx?.sampleRate || 16000;
+      const resampledBuffer = this.downsampleTo16000(inputBuffer, actualSampleRate);
+      const pcm16Buffer = this.floatTo16BitPCM(resampledBuffer);
       const base64 = this.arrayBufferToBase64(pcm16Buffer);
 
       if (this.onAudioChunkCallback && base64) {
@@ -237,6 +247,30 @@ export class AudioStreamer {
   }
 
   // --- Utility conversions ---
+
+  private downsampleTo16000(buffer: Float32Array, fromRate: number): Float32Array {
+    if (fromRate === 16000 || buffer.length === 0) {
+      return buffer;
+    }
+    const ratio = fromRate / 16000;
+    const newLength = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      result[offsetResult] = count > 0 ? accum / count : buffer[offsetBuffer];
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+  }
 
   private floatTo16BitPCM(input: Float32Array): ArrayBuffer {
     const output = new Int16Array(input.length);

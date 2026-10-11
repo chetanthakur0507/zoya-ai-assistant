@@ -5,7 +5,12 @@ import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type, LiveServerMessage } from '@google/genai';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
+// Load .env.local first if it exists, otherwise load .env
+if (fs.existsSync(path.resolve(process.cwd(), '.env.local'))) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+}
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,14 +18,20 @@ const __dirname = path.dirname(__filename);
 const isProd = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT) || 3000;
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getAi(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured in .env or .env.local');
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
 const ZOYA_SYSTEM_INSTRUCTION = `
 You are Zoya, a young, confident, witty, and sassy female AI companion.
@@ -123,7 +134,21 @@ async function startServer() {
     // Send initial status
     clientWs.send(JSON.stringify({ type: 'status', status: 'connecting' }));
 
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error('[Live] Missing GEMINI_API_KEY');
+      clientWs.send(
+        JSON.stringify({
+          type: 'error',
+          message: 'GEMINI_API_KEY is missing. Please set your Gemini API key in .env or .env.local.',
+        })
+      );
+      clientWs.close();
+      return;
+    }
+
     try {
+      const ai = getAi();
       // Connect to Gemini Live
       const session = await ai.live.connect({
         model: 'gemini-3.1-flash-live-preview',
